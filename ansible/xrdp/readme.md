@@ -1,5 +1,5 @@
 ## Description
-Configures a freshly created Ubuntu Focal Droplet with XRDP to enable graphical login via any RDP client via and SSH tunnel. SSH access to the Droplet itself is via key authentication only.
+Configures a freshly created Ubuntu Focal Droplet with XRDP to enable graphical login via any RDP client via an SSH tunnel. SSH access to the Droplet itself is via key authentication only. This is useful for data curation as it is possible to view/edit large datasets (e.g., geospatial data) more easily. It is also possible to edit the curation report remotely.
 
 ## Configure
 Edit ```install-RDP_GUI-Ubuntu-Droplet-template.yml``` and follow the instructions therein. 
