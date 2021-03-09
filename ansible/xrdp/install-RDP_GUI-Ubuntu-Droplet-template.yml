@@ -1,0 +1,287 @@
+---
+# Sets up a fresh Digital Ocean droplet with XRDP to enable RDP login via 
+# SSH tunnel only. SSH access to the droplet is only via key authentication
+#
+# Prereqs: 
+#   1. create a fresh ubuntu droplet with SSH key login. 
+#      Add the appropriate keys from the droplet creation page.
+#   2. ssh in as root.
+#   3. Install Ansible.
+#       apt update #disable for ubuntu focal for now 
+#       apt install software-properties-common
+#       apt-add-repository --yes --update ppa:ansible/ansible
+#       apt install ansible
+#
+#
+# Running this playbook
+#
+#   1. While still logged in as root, create a new file called install.yml
+#        nano install.yml
+#      Copy and paste this entire file into the yml file via the terminal.
+#
+#   1. edit the vars section below to add the user, password and ssh keys for that user.
+#      Replace the angle bracket placeholders with the actual values desired
+#      For the ssh keys note the required indentation. The whole key must be indented.
+#           For sshkey it's in id_rsa.pub. Needed for the ssh connection to this droplet.
+#           For sshkey_priv it's in id_rsa. Needed for the sshfs connection from droplet to curation storage.
+#      Note that when creating a droplet with SSH key login in Digital Ocean, password login 
+#      via SSH is automatically disabled. Therefore, the password set by 
+#      create_user_password can't be used for remote login, only local login (eg., xrdp)
+#
+#   3. While still logged in as root,  execute the following: 
+#        ansible-playbook <name of this file> --tags "xxx"
+#
+#      --tags only runs tasks tagged with xxx. Can be a comma-separated list of:
+#         install-packages: installs the required packages for xrdp and other useful things
+#         osboxes: Don't use for Digital Ocean.
+#         create-user: creates the specified user on the machine.
+#         setup-xrdp: sets up xrdp access for the user specified by create_user_name
+#         setup-sshfs: sets up sshfs mountpoint via key login to the host specified in
+#                       sshfs_host in folder named sshfs_mountpoint using the key given in
+#                       create_user_sshkey_priv. sshfs will automount on login
+#      
+#      Run the command below to set up everything (recommended for first run)
+#        ansible-playbook install.yml --tags "install-packages,create-user,setup-xrdp,setup-sshfs"
+#
+# Using RDP via tunnel on Windows (no admin rights needed)
+#   1. start ssh with a tunnel
+#       ssh -L 33389:localhost:3389 user@host 
+
+
+- name: "install Mate + XRDP desktop to an Ubuntu Droplet"
+  hosts: localhost  #supposedly doesn't require a hosts file if you do this
+  vars:
+    create_user_name: <user>
+    create_user_password: <password> #can only be used to log in to xrdp session after SSH auth.
+    sshfs_mountpoint: curation1
+    sshfs_hostpath: <host>:<hostpath> #host and path to the curation directory
+    create_user_sshkey: |
+      ssh-rsa <public key>
+    create_user_sshkey_priv: |
+        -----BEGIN RSA PRIVATE KEY-----
+        <private key>
+        -----END RSA PRIVATE KEY-----
+
+  remote_user: root
+  become: yes
+  tasks:
+  - name: "update apt cache and upgrade"
+    tags:
+      - install-packages
+    apt:
+      update_cache: yes #disable for ubuntu focal for now
+      upgrade: yes
+      
+      
+      
+  - name: "install ubuntu MATE core, desktop"
+    tags:
+      - install-packages
+    apt:
+      pkg:
+        - ubuntu-mate-core
+        - ubuntu-mate-desktop
+      install_recommends: no
+      
+  - name: "install MATE core, desktop xrdp"
+    tags:
+      - install-packages  
+    apt:
+      pkg:
+        - mate-core
+        - mate-desktop-environment
+        - mate-notification-daemon
+        - xrdp
+        
+        
+        
+  - name: "install firefox, synaptic, sshfs, dconf-editor, libreoffice, file-roller, qgis"
+    tags:
+      - install-packages  
+    apt:
+      pkg:
+        - synaptic
+        - firefox
+        - sshfs
+        - dconf-editor
+        - dconf-cli
+        - libreoffice
+        - file-roller
+        - qgis
+        
+  - name: "add ms fonts"
+    tags:
+      - install-packages
+    ignore_errors: yes
+    block:
+      - name: "Accept License"
+        shell: "echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections"
+      - name: "add ms fonts"
+        apt: pkg=ttf-mscorefonts-installer
+        
+        
+        
+  - name: "install caja addons"
+    tags:
+      - install-packages  
+    apt:
+      pkg:
+        - caja-admin
+        - caja-open-terminal
+        - caja-eiciel
+        
+        
+        
+  - name: "enable dhcp for all adapters (this name isn't shown, names of tasks in block are)"
+    # the Ubuntu image on osboxes.org doesn't have DHCP enabled for some reason
+    tags:
+      - osboxes
+    block:
+      - name: "for ubuntu server: modify netplan DHCP config"
+        blockinfile:
+          path: /etc/netplan/50-cloud-init.yaml
+          insertafter: EOF
+          # https://stackoverflow.com/questions/39731999/
+          # the | says to keep newlines, the 2 says the following text block starts with 2 spaces. any other spaces are kept
+          content: |2
+                ethernets:
+                  alladapters:
+                    match:
+                      name: enp0*
+                    dhcp4: true
+      - name: "for ubuntu server: apply netplan settings"
+        shell:
+          cmd: |
+            netplan generate
+            netplan apply
+         
+
+         
+  - name: "create user (this name isn't shown, names of tasks in block are)"
+    tags:
+      - create-user
+    ignore_errors: yes
+    block:
+      - name: "create user {{ create_user_name }} with password {{ create_user_password }}"
+        shell:
+          # https://stackoverflow.com/a/23902416
+          cmd: |
+            useradd -m -s /bin/bash -p $(openssl passwd -1 {{ create_user_password }}) {{ create_user_name }}
+      - name: "add {{ create_user_name }} to admin and sudo"
+        shell:
+          cmd: |
+            usermod -aG admin {{ create_user_name }}
+            usermod -aG adm {{ create_user_name }}
+            usermod -aG sudo {{ create_user_name }}
+      - name: "create {{ create_user_name }}/.ssh folder"
+        file:
+          path: /home/{{ create_user_name }}/.ssh/
+          state: directory
+          recurse: yes
+          owner: "{{ create_user_name }}"
+          mode: 0700
+      - name: "copy About Me to desktop"
+        copy:
+          dest: /home/{{ create_user_name }}/Desktop
+          src: /usr/share/applications/mate-about-me.desktop
+          owner: "{{ create_user_name }}"
+          mode: 0744
+      - name: "copy firefox to desktop"
+        copy:
+          dest: /home/{{ create_user_name }}/Desktop
+          src: /usr/share/applications/firefox.desktop
+          owner: "{{ create_user_name }}"
+          mode: 0744
+      - name: "copy file roller to desktop"
+        copy:
+          dest: /home/{{ create_user_name }}/Desktop
+          src: /usr/share/applications/org.gnome.FileRoller.desktop
+          owner: "{{ create_user_name }}"
+          mode: 0744
+      - name: "copy pluma to desktop"
+        copy:
+          dest: /home/{{ create_user_name }}/Desktop
+          src: /usr/share/applications/pluma.desktop
+          owner: "{{ create_user_name }}"
+          mode: 0744
+      - name: "desktop config"
+        shell:
+          cmd: |
+             sudo -u {{ create_user_name }} HOME=/home/{{ create_user_name }} dbus-launch dconf write /org/mate/pluma/plugins/spell/autocheck-type "'always'"
+             sudo -u {{ create_user_name }} HOME=/home/{{ create_user_name }} dbus-launch dconf write /org/mate/caja/desktop/trash-icon-visible "true"
+             sudo -u {{ create_user_name }} HOME=/home/{{ create_user_name }} dbus-launch dconf write /org/mate/screensaver/idle-activation-enabled "false"
+          
+  
+  
+  
+  - name: "set up ssh keys"
+    tags:
+      - create-user
+    block:
+      - name: "add public ssh key - for logging in"
+        copy:
+          dest: /home/{{ create_user_name }}/.ssh/authorized_keys      
+          owner: "{{ create_user_name }}"
+          mode: 0600
+          force: no
+          content: "{{ create_user_sshkey }}"
+        when: create_user_sshkey|length > 0
+
+
+
+  - name: "set up xrdp"
+    tags:
+      - setup-xrdp
+    block:
+      - name: "xsession files for xrdp for {{ create_user_name }}"
+        copy:
+          dest: /home/{{ create_user_name }}/.xsession
+          owner: "{{ create_user_name }}"
+          mode: 0644
+          content: mate-session
+      - name: "skel"
+        copy:
+          src: /home/{{ create_user_name }}/.xsession
+          dest: /etc/skel/
+      - name: "adjust xrdp to listen on localhost only"
+        ini_file:
+          path: /etc/xrdp/xrdp.ini
+          section: Globals
+          option: port
+          value: tcp://.:3389 #set xrdp to listen only on localhost. must use ssh tunnel
+          create: no
+      - name: "restart xrdp"
+        service:
+          name: xrdp
+          state: restarted
+
+
+
+  - name: "set up sshfs"
+    tags:
+      - setup-sshfs
+    block:
+      - name: "add private ssh key - for sshfs"
+        copy:
+          dest: /home/{{ create_user_name }}/.ssh/id_rsa      
+          owner: "{{ create_user_name }}"
+          mode: 0600
+          force: no
+          content: "{{ create_user_sshkey_priv }}"
+        when: create_user_sshkey_priv|length > 0
+      - name: "create sshfs mountpoint"
+        file:
+          path: /home/{{ create_user_name }}/{{ sshfs_mountpoint }}/
+          state: directory
+          recurse: yes
+          owner: "{{ create_user_name }}"
+          mode: 0700
+      - name: "set up mount"
+        blockinfile:
+          path: /home/{{ create_user_name }}/.profile
+          insertafter: EOF
+          content: |
+            sshfs -o IdentityFile=~/.ssh/id_rsa {{ create_user_name }}@{{ sshfs_hostpath }} /home/{{ create_user_name }}/{{ sshfs_mountpoint }}
+            
+  
+
