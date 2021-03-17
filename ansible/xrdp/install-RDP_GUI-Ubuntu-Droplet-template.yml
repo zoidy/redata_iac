@@ -281,7 +281,7 @@
           path: /home/{{ create_user_name }}/.profile
           insertafter: EOF
           content: |
-            sshfs -o IdentityFile=~/.ssh/id_rsa {{ create_user_name }}@{{ sshfs_hostpath }} /home/{{ create_user_name }}/{{ sshfs_mountpoint }}
+            sshfs -o follow_symlinks -o IdentityFile=~/.ssh/id_rsa {{ create_user_name }}@{{ sshfs_hostpath }} /home/{{ create_user_name }}/{{ sshfs_mountpoint }}
             
   
 
