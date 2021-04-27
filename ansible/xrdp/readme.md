@@ -13,4 +13,4 @@ See the template for more detailed instructions and additional variables.
 ## Connecting from Windows
 1. Download ```ssh.exe``` from https://github.com/PowerShell/Win32-OpenSSH and put it in the ```CurationRemoteConnectFiles``` folder
 2. Edit ```curation-remote-connect.cmd``` and change the ```<user>``` and ```<host>``` placeholders to the values you used previously.
-3. Double click the ```CurationRemoteConnect``` shortcut. This will create an ssh tunnel to the Droplet and launch the built-in Windows Remote Desktop client using the pre-configured Default.rdp profile.
+3. Double click the ```CurationRemoteConnect.lnk``` shortcut. This will create an ssh tunnel to the Droplet and launch the built-in Windows Remote Desktop client using the pre-configured Default.rdp profile.
